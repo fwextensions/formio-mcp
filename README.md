@@ -51,7 +51,18 @@ export FORMIO_API_KEY="your-api-key"
 3. Go to Settings → API Keys to generate an API key
 4. Alternatively, use JWT authentication with your user token
 
-## Usage with Claude Desktop
+## Transport Modes
+
+This server supports two transport modes:
+
+1. **STDIO Transport (Default)** - For Claude Desktop and similar process-based clients
+2. **HTTP Transport** - For HTTP-based MCP clients and remote access
+
+---
+
+## STDIO Transport (Default)
+
+### Usage with Claude Desktop
 
 Add this server to your Claude Desktop configuration file:
 
@@ -74,6 +85,228 @@ Add this server to your Claude Desktop configuration file:
 ```
 
 Restart Claude Desktop after updating the configuration.
+
+---
+
+## HTTP Transport
+
+### Why Use HTTP Transport?
+
+- **Remote Access**: Host the server on a machine accessible over the network
+- **Multi-Client**: Multiple clients can connect to the same server instance
+- **Web Integration**: Easier integration with web-based MCP clients
+- **Debugging**: Standard HTTP tools (curl, Postman) can be used for testing
+
+### Setup
+
+#### 1. Generate an API Key
+
+```bash
+openssl rand -hex 32
+```
+
+#### 2. Configure Environment Variables
+
+Create a `.env` file or set environment variables:
+
+```bash
+# Form.io Configuration
+FORMIO_PROJECT_URL=https://your-project.form.io
+FORMIO_API_KEY=your-formio-api-key
+
+# MCP HTTP Server Configuration
+MCP_HTTP_PORT=3000
+MCP_HTTP_HOST=localhost
+MCP_BASE_PATH=/mcp/v1
+
+# Authentication
+MCP_API_KEYS=your-generated-api-key-here
+MCP_REQUIRE_AUTH=true
+
+# CORS (optional - supports wildcards)
+MCP_CORS_ORIGINS=http://localhost:*,https://yourdomain.com
+```
+
+#### 3. Start the Server
+
+```bash
+npm run start:http
+```
+
+You should see output like:
+```
+[MCP] Starting in HTTP mode...
+[MCP] HTTP configuration loaded: { port: 3000, host: 'localhost', ... }
+[MCP] Form.io MCP Server (HTTP) listening on http://localhost:3000
+[MCP] Endpoints:
+  - Health:   http://localhost:3000/mcp/v1/health
+  - Info:     http://localhost:3000/mcp/v1/info
+  - SSE:      http://localhost:3000/mcp/v1/sse
+  - Messages: http://localhost:3000/mcp/v1/messages
+[MCP] Server ready to accept connections
+```
+
+### HTTP Client Configuration
+
+For MCP clients that support HTTP transport, use this configuration:
+
+```json
+{
+  "mcpServers": {
+    "formio": {
+      "url": "http://localhost:3000/mcp/v1",
+      "transport": "http+sse",
+      "headers": {
+        "Authorization": "Bearer your-generated-api-key-here"
+      }
+    }
+  }
+}
+```
+
+### HTTP API Endpoints
+
+#### Public Endpoints (No Authentication Required)
+
+**GET `/mcp/v1/health`** - Health check
+```bash
+curl http://localhost:3000/mcp/v1/health
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-10-09T12:00:00.000Z",
+  "server": "formio-mcp-server",
+  "transport": "http+sse",
+  "connections": 0
+}
+```
+
+**GET `/mcp/v1/info`** - Server information
+```bash
+curl http://localhost:3000/mcp/v1/info
+```
+
+#### Protected Endpoints (Authentication Required)
+
+**GET `/mcp/v1/sse`** - Establish SSE connection
+```bash
+curl -H "Authorization: Bearer your-api-key" \
+     -N http://localhost:3000/mcp/v1/sse
+```
+
+This opens a long-lived connection for receiving responses. The server will send:
+- Initial `connected` event with a `connectionId`
+- Heartbeat comments every 30 seconds
+- Response events for your requests
+
+**POST `/mcp/v1/messages`** - Send JSON-RPC requests
+```bash
+curl -X POST http://localhost:3000/mcp/v1/messages \
+     -H "Authorization: Bearer your-api-key" \
+     -H "Content-Type: application/json" \
+     -H "X-Connection-ID: your-connection-id" \
+     -d '{
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "tools/list",
+       "params": {}
+     }'
+```
+
+### HTTP Workflow
+
+1. **Establish SSE Connection**: Client connects to `/mcp/v1/sse` and receives a `connectionId`
+2. **Send Requests**: Client sends JSON-RPC requests to `/mcp/v1/messages` with the `X-Connection-ID` header
+3. **Receive Responses**: Server sends responses via the SSE connection
+4. **Keep-Alive**: Server sends heartbeat comments to maintain the connection
+
+### Security
+
+- **Authentication**: All protected endpoints require `Authorization: Bearer <token>` header
+- **CORS**: Configurable origins with wildcard support
+- **Rate Limiting**: Configurable request limits (default: 100 requests per minute)
+- **Security Headers**: Helmet middleware adds standard security headers
+- **HTTPS**: Use a reverse proxy (nginx, Apache) for HTTPS in production
+
+### Configuration Options
+
+All HTTP settings can be configured via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_HTTP_PORT` | `3000` | Port to listen on |
+| `MCP_HTTP_HOST` | `localhost` | Host to bind to |
+| `MCP_BASE_PATH` | `/mcp/v1` | Base path for API endpoints |
+| `MCP_API_KEYS` | (none) | Comma-separated API keys |
+| `MCP_REQUIRE_AUTH` | `true` | Enable/disable authentication |
+| `MCP_CORS_ORIGINS` | `http://localhost:*` | Allowed CORS origins |
+| `MCP_RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window (ms) |
+| `MCP_RATE_LIMIT_MAX` | `100` | Max requests per window |
+| `MCP_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
+| `MCP_SSE_TIMEOUT_MS` | `300000` | SSE connection timeout (ms) |
+
+### Deployment
+
+#### Local Development
+```bash
+MCP_API_KEYS=test-key-123 npm run start:http
+```
+
+#### Production with systemd
+Create `/etc/systemd/system/formio-mcp.service`:
+```ini
+[Unit]
+Description=Form.io MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/formio-mcp
+ExecStart=/usr/bin/node /opt/formio-mcp/dist/index.js --http
+Environment="FORMIO_PROJECT_URL=https://your-project.form.io"
+Environment="FORMIO_API_KEY=your-formio-key"
+Environment="MCP_API_KEYS=your-secure-key"
+Environment="MCP_HTTP_HOST=0.0.0.0"
+Environment="MCP_HTTP_PORT=3000"
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+```bash
+sudo systemctl enable formio-mcp
+sudo systemctl start formio-mcp
+sudo systemctl status formio-mcp
+```
+
+#### With Docker
+```dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY dist ./dist
+EXPOSE 3000
+CMD ["node", "dist/index.js", "--http"]
+```
+
+Build and run:
+```bash
+docker build -t formio-mcp .
+docker run -p 3000:3000 \
+  -e FORMIO_PROJECT_URL=https://your-project.form.io \
+  -e FORMIO_API_KEY=your-key \
+  -e MCP_API_KEYS=your-mcp-key \
+  formio-mcp
+```
+
+---
 
 ## Safety & Guardrails
 

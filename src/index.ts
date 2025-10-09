@@ -5,6 +5,10 @@
  *
  * An MCP server that provides tools for interacting with Form.io API
  * to create, list, get, and edit forms using natural language.
+ *
+ * Supports two transport modes:
+ * - STDIO (default): For use with Claude Desktop and similar clients
+ * - HTTP (--http flag): For use with HTTP-based MCP clients
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -16,6 +20,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { FormioClient } from './utils/formio-client.js';
 import type { FormioForm, FormioComponent } from './types/formio.js';
+import { loadHttpConfig, validateHttpConfig } from './config/http-config.js';
+import { SSEManager } from './transport/sse-manager.js';
+import { HttpTransport } from './transport/http-transport.js';
+import { createHttpServer } from './server/http-server.js';
+
+// Parse command line arguments
+const args = process.argv.slice(2);
+const transportType = args.includes('--http') ? 'http' : 'stdio';
 
 // Environment configuration
 const FORMIO_PROJECT_URL = process.env.FORMIO_PROJECT_URL;
@@ -426,12 +438,97 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start server
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error('Form.io MCP Server running on stdio');
+  if (transportType === 'http') {
+    // ============================================
+    // HTTP Transport Mode
+    // ============================================
+
+    console.error('[MCP] Starting in HTTP mode...');
+
+    // Load and validate HTTP configuration
+    const config = loadHttpConfig();
+    const validation = validateHttpConfig(config);
+
+    if (!validation.valid) {
+      console.error('[MCP] Invalid HTTP configuration:');
+      validation.errors.forEach(err => console.error(`  - ${err}`));
+      process.exit(1);
+    }
+
+    console.error('[MCP] HTTP configuration loaded:', {
+      port: config.port,
+      host: config.host,
+      basePath: config.basePath,
+      authRequired: config.requireAuth
+    });
+
+    // Create SSE manager
+    const sseManager = new SSEManager(config.sseHeartbeatInterval);
+
+    // Create HTTP transport
+    const httpTransport = new HttpTransport(server, sseManager);
+
+    // Register tool handlers with HTTP transport
+    // The handlers will process requests and send responses via SSE
+    httpTransport.registerHandler('tools/list', async (request) => {
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { tools: TOOLS }
+      };
+    });
+
+    httpTransport.registerHandler('tools/call', async (request) => {
+      // Reuse the existing tool call handler logic
+      const { name, arguments: toolArgs } = request.params as any;
+
+      if (!toolArgs) {
+        throw new Error('Missing arguments');
+      }
+
+      // Execute the tool (this uses the existing switch statement logic)
+      // We'll call the CallToolRequestSchema handler
+      const result = await server.request(
+        { method: 'tools/call', params: { name, arguments: toolArgs } },
+        CallToolRequestSchema
+      );
+
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result
+      };
+    });
+
+    // Create Express app
+    const app = createHttpServer(config, {
+      sseManager,
+      transport: httpTransport
+    });
+
+    // Start HTTP server
+    app.listen(config.port, config.host, () => {
+      console.error(`[MCP] Form.io MCP Server (HTTP) listening on http://${config.host}:${config.port}`);
+      console.error(`[MCP] Endpoints:`);
+      console.error(`  - Health:   http://${config.host}:${config.port}${config.basePath}/health`);
+      console.error(`  - Info:     http://${config.host}:${config.port}${config.basePath}/info`);
+      console.error(`  - SSE:      http://${config.host}:${config.port}${config.basePath}/sse`);
+      console.error(`  - Messages: http://${config.host}:${config.port}${config.basePath}/messages`);
+      console.error(`[MCP] Server ready to accept connections`);
+    });
+
+  } else {
+    // ============================================
+    // STDIO Transport Mode (default)
+    // ============================================
+
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error('[MCP] Form.io MCP Server running on stdio');
+  }
 }
 
 main().catch((error) => {
-  console.error('Fatal error:', error);
+  console.error('[MCP] Fatal error:', error);
   process.exit(1);
 });
