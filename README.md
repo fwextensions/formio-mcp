@@ -69,12 +69,13 @@ Add this server to your Claude Desktop configuration file:
 **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
+**MacOS/Linux Example:**
 ```json
 {
   "mcpServers": {
     "formio": {
       "command": "node",
-      "args": ["C:\\Projects\\SFDS\\AI\\code\\formio-mcp\\dist\\index.js"],
+      "args": ["/absolute/path/to/formio-mcp/dist/index.js"],
       "env": {
         "FORMIO_PROJECT_URL": "https://your-project.form.io",
         "FORMIO_API_KEY": "your-api-key-here"
@@ -83,6 +84,24 @@ Add this server to your Claude Desktop configuration file:
   }
 }
 ```
+
+**Windows Example:**
+```json
+{
+  "mcpServers": {
+    "formio": {
+      "command": "node",
+      "args": ["C:\\path\\to\\formio-mcp\\dist\\index.js"],
+      "env": {
+        "FORMIO_PROJECT_URL": "https://your-project.form.io",
+        "FORMIO_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+**Note:** Replace the path with the absolute path to where you cloned this repository.
 
 Restart Claude Desktop after updating the configuration.
 
@@ -115,7 +134,7 @@ FORMIO_PROJECT_URL=https://your-project.form.io
 FORMIO_API_KEY=your-formio-api-key
 
 # MCP HTTP Server Configuration
-MCP_HTTP_PORT=3000
+MCP_HTTP_PORT=44844
 MCP_HTTP_HOST=localhost
 MCP_BASE_PATH=/mcp/v1
 
@@ -136,25 +155,33 @@ npm run start:http
 You should see output like:
 ```
 [MCP] Starting in HTTP mode...
-[MCP] HTTP configuration loaded: { port: 3000, host: 'localhost', ... }
-[MCP] Form.io MCP Server (HTTP) listening on http://localhost:3000
+[MCP] HTTP configuration loaded: { port: 44844, host: 'localhost', ... }
+[MCP] Form.io MCP Server (HTTP) listening on http://localhost:44844
 [MCP] Endpoints:
-  - Health:   http://localhost:3000/mcp/v1/health
-  - Info:     http://localhost:3000/mcp/v1/info
-  - SSE:      http://localhost:3000/mcp/v1/sse
-  - Messages: http://localhost:3000/mcp/v1/messages
+  - Health:   http://localhost:44844/mcp/v1/health
+  - Info:     http://localhost:44844/mcp/v1/info
+  - SSE:      http://localhost:44844/mcp/v1/sse
+  - Messages: http://localhost:44844/mcp/v1/messages
 [MCP] Server ready to accept connections
 ```
 
 ### HTTP Client Configuration
 
-For MCP clients that support HTTP transport, use this configuration:
+**Note:** As of now, Claude Desktop only supports STDIO transport. HTTP transport is intended for:
+- HTTP-capable MCP clients (like Windsurf, Cline, or custom implementations)
+- Remote server deployments
+- Multi-user/multi-client scenarios
+- Web-based MCP client integrations
+
+#### Generic HTTP Client Configuration
+
+For MCP clients that support HTTP transport with SSE:
 
 ```json
 {
   "mcpServers": {
     "formio": {
-      "url": "http://localhost:3000/mcp/v1",
+      "url": "http://localhost:44844/mcp/v1",
       "transport": "http+sse",
       "headers": {
         "Authorization": "Bearer your-generated-api-key-here"
@@ -164,13 +191,33 @@ For MCP clients that support HTTP transport, use this configuration:
 }
 ```
 
+#### Windsurf Configuration Example
+
+If using Windsurf or similar IDE with MCP support:
+
+```json
+{
+  "mcpServers": {
+    "formio": {
+      "type": "http",
+      "url": "http://localhost:44844/mcp/v1",
+      "headers": {
+        "Authorization": "Bearer your-generated-api-key-here"
+      }
+    }
+  }
+}
+```
+
+**For Claude Desktop users:** Continue using STDIO transport (see above). HTTP transport support may be added in future versions.
+
 ### HTTP API Endpoints
 
 #### Public Endpoints (No Authentication Required)
 
 **GET `/mcp/v1/health`** - Health check
 ```bash
-curl http://localhost:3000/mcp/v1/health
+curl http://localhost:44844/mcp/v1/health
 ```
 
 Response:
@@ -186,7 +233,7 @@ Response:
 
 **GET `/mcp/v1/info`** - Server information
 ```bash
-curl http://localhost:3000/mcp/v1/info
+curl http://localhost:44844/mcp/v1/info
 ```
 
 #### Protected Endpoints (Authentication Required)
@@ -194,7 +241,7 @@ curl http://localhost:3000/mcp/v1/info
 **GET `/mcp/v1/sse`** - Establish SSE connection
 ```bash
 curl -H "Authorization: Bearer your-api-key" \
-     -N http://localhost:3000/mcp/v1/sse
+     -N http://localhost:44844/mcp/v1/sse
 ```
 
 This opens a long-lived connection for receiving responses. The server will send:
@@ -204,7 +251,7 @@ This opens a long-lived connection for receiving responses. The server will send
 
 **POST `/mcp/v1/messages`** - Send JSON-RPC requests
 ```bash
-curl -X POST http://localhost:3000/mcp/v1/messages \
+curl -X POST http://localhost:44844/mcp/v1/messages \
      -H "Authorization: Bearer your-api-key" \
      -H "Content-Type: application/json" \
      -H "X-Connection-ID: your-connection-id" \
@@ -237,7 +284,7 @@ All HTTP settings can be configured via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MCP_HTTP_PORT` | `3000` | Port to listen on |
+| `MCP_HTTP_PORT` | `44844` | Port to listen on |
 | `MCP_HTTP_HOST` | `localhost` | Host to bind to |
 | `MCP_BASE_PATH` | `/mcp/v1` | Base path for API endpoints |
 | `MCP_API_KEYS` | (none) | Comma-separated API keys |
@@ -271,7 +318,7 @@ Environment="FORMIO_PROJECT_URL=https://your-project.form.io"
 Environment="FORMIO_API_KEY=your-formio-key"
 Environment="MCP_API_KEYS=your-secure-key"
 Environment="MCP_HTTP_HOST=0.0.0.0"
-Environment="MCP_HTTP_PORT=3000"
+Environment="MCP_HTTP_PORT=44844"
 Restart=always
 
 [Install]
@@ -292,14 +339,14 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
 COPY dist ./dist
-EXPOSE 3000
+EXPOSE 44844
 CMD ["node", "dist/index.js", "--http"]
 ```
 
 Build and run:
 ```bash
 docker build -t formio-mcp .
-docker run -p 3000:3000 \
+docker run -p 44844:44844 \
   -e FORMIO_PROJECT_URL=https://your-project.form.io \
   -e FORMIO_API_KEY=your-key \
   -e MCP_API_KEYS=your-mcp-key \

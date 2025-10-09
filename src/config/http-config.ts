@@ -31,7 +31,7 @@ export interface HttpConfig {
 export function loadHttpConfig(): HttpConfig {
   return {
     // Server settings
-    port: parseInt(process.env.MCP_HTTP_PORT || '3000', 10),
+    port: parseInt(process.env.MCP_HTTP_PORT || '44844', 10),
     host: process.env.MCP_HTTP_HOST || 'localhost',
     basePath: process.env.MCP_BASE_PATH || '/mcp/v1',
 
