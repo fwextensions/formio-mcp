@@ -4,7 +4,9 @@
       "WebFetch(domain:apidocs.form.io)",
       "Bash(mkdir:*)",
       "Bash(npm install)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd safety guardrails and improve MCP compliance\n\n- Add MCP form identification with ''mcp-'' path prefix and ''[MCP] '' title prefix\n- Implement ownership validation: only allow updates/deletes of MCP-created forms\n- Add path normalization to meet Form.io requirements (lowercase, valid characters)\n- Improve error handling to properly throw errors per MCP spec\n- Add flexible component parameter handling for model compatibility\n- Update tool schemas: use ''integer'' type and restore default values\n- Add capabilities.tools.listChanged for proper MCP negotiation\n- Update documentation with comprehensive safety guardrails section\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []

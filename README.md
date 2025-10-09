@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) server that enables AI assistants to interact wit
 - **Update Forms**: Modify existing forms and their components
 - **Delete Forms**: Remove forms from your project
 - **Component Builder**: Helper tool to create properly structured Form.io components
+- **Safety Guardrails**: MCP can only modify forms it created, protecting existing forms from accidental changes
 
 ## Prerequisites
 
@@ -73,6 +74,32 @@ Add this server to your Claude Desktop configuration file:
 ```
 
 Restart Claude Desktop after updating the configuration.
+
+## Safety & Guardrails
+
+To protect your existing Form.io forms from accidental modifications, this MCP server implements strict ownership controls:
+
+### MCP-Created Forms
+When MCP creates a form, it automatically:
+- Prepends `[MCP] ` to the form title (e.g., "Contact Form" becomes "[MCP] Contact Form")
+- Prepends `mcp-` to the form path (e.g., "contact" becomes "mcp-contact")
+
+### What MCP Can Do
+✅ **List and read ALL forms** - MCP can view any form in your project, including those created outside MCP
+✅ **Create new forms** - All created forms will be automatically prefixed
+✅ **Update MCP-created forms** - Only forms with the MCP prefix can be modified
+✅ **Delete MCP-created forms** - Only forms with the MCP prefix can be deleted
+
+### What MCP Cannot Do
+❌ **Modify non-MCP forms** - Update attempts on forms without MCP prefixes will be rejected
+❌ **Delete non-MCP forms** - Delete attempts on forms without MCP prefixes will be rejected
+
+### Identification
+A form is considered "MCP-created" if either:
+- The title starts with `[MCP] `, OR
+- The path starts with `mcp-`
+
+If you attempt to update or delete a non-MCP form, you'll receive a clear error message explaining that the operation is not permitted.
 
 ## Available Tools
 

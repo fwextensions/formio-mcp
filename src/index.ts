@@ -26,6 +26,24 @@ if (!FORMIO_PROJECT_URL) {
   throw new Error('FORMIO_PROJECT_URL environment variable is required');
 }
 
+// MCP form identification prefixes
+const MCP_PATH_PREFIX = 'mcp-';
+const MCP_TITLE_PREFIX = '[MCP] ';
+
+// Helper functions for MCP form validation
+function isMCPForm(form: FormioForm): boolean {
+  return form.path?.startsWith(MCP_PATH_PREFIX) || form.title?.startsWith(MCP_TITLE_PREFIX);
+}
+
+function validateMCPOwnership(form: FormioForm, operation: string): void {
+  if (!isMCPForm(form)) {
+    throw new Error(
+      `Cannot ${operation} form "${form.title || form.name}": This form was not created by MCP. ` +
+      `MCP can only ${operation} forms it created (prefixed with "${MCP_TITLE_PREFIX}" or path starting with "${MCP_PATH_PREFIX}").`
+    );
+  }
+}
+
 // Initialize Form.io client
 const formioClient = new FormioClient({
   baseUrl: FORMIO_PROJECT_URL,
@@ -43,13 +61,13 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: {
         limit: {
-          type: 'number',
-          description: 'Maximum number of forms to return (default: 100)',
+          type: 'integer',
+          description: 'Maximum number of forms to return',
           default: 100
         },
         skip: {
-          type: 'number',
-          description: 'Number of forms to skip for pagination (default: 0)',
+          type: 'integer',
+          description: 'Number of forms to skip for pagination',
           default: 0
         }
       }
@@ -71,13 +89,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_form',
-    description: 'Create a new form from a JSON schema. The form will include title, name, path, and components array.',
+    description: 'Create a new form from a JSON schema. The form will include title, name, path, and components array. NOTE: The title will be automatically prefixed with "[MCP] " and the path will be prefixed with "mcp-" to identify MCP-created forms.',
     inputSchema: {
       type: 'object',
       properties: {
         title: {
           type: 'string',
-          description: 'Human-readable title for the form'
+          description: 'Human-readable title for the form (will be automatically prefixed with "[MCP] ")'
         },
         name: {
           type: 'string',
@@ -85,7 +103,7 @@ const TOOLS: Tool[] = [
         },
         path: {
           type: 'string',
-          description: 'URL path for the form (lowercase, no spaces)'
+          description: 'URL path for the form (will be normalized to lowercase, letters/numbers/hyphens only, and automatically prefixed with "mcp-")'
         },
         components: {
           type: 'array',
@@ -96,13 +114,13 @@ const TOOLS: Tool[] = [
         },
         display: {
           type: 'string',
-          description: 'Display type: form, wizard, or pdf (default: form)',
+          description: 'Display type: form, wizard, or pdf',
           enum: ['form', 'wizard', 'pdf'],
           default: 'form'
         },
         type: {
           type: 'string',
-          description: 'Form type: form or resource (default: form)',
+          description: 'Form type: form or resource',
           enum: ['form', 'resource'],
           default: 'form'
         }
@@ -202,7 +220,9 @@ const server = new Server(
   },
   {
     capabilities: {
-      tools: {}
+      tools: {
+        listChanged: true
+      }
     }
   }
 );
@@ -262,11 +282,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'create_form': {
+        const title = args.title as string;
+        let path = args.path as string;
+
+        // Normalize path to meet Form.io requirements:
+        // - Only letters, numbers, hyphens, and forward slashes
+        // - Cannot start or end with hyphen or forward slash
+        // - Must be lowercase
+        path = path
+          .toLowerCase()
+          .replace(/[^a-z0-9\-\/]/g, '') // Remove invalid characters
+          .replace(/^[\-\/]+|[\-\/]+$/g, ''); // Remove leading/trailing hyphens or slashes
+
+        if (!path) {
+          throw new Error('Invalid path: after normalization, path is empty. Path must contain letters or numbers.');
+        }
+
+        // Handle components - if it's an object with a components property, extract the array
+        let components: FormioComponent[];
+        if (Array.isArray(args.components)) {
+          components = args.components as FormioComponent[];
+        } else if (typeof args.components === 'object' && args.components !== null && 'components' in args.components) {
+          // Model passed entire form structure as components param
+          components = (args.components as any).components as FormioComponent[];
+        } else {
+          throw new Error('Invalid components parameter: must be an array of component objects');
+        }
+
+        // Prepend MCP prefixes to identify forms created by MCP
+        const mcpTitle = title.startsWith(MCP_TITLE_PREFIX) ? title : `${MCP_TITLE_PREFIX}${title}`;
+        const mcpPath = path.startsWith(MCP_PATH_PREFIX) ? path : `${MCP_PATH_PREFIX}${path}`;
+
         const formData: Omit<FormioForm, '_id' | 'created' | 'modified'> = {
-          title: args.title as string,
+          title: mcpTitle,
           name: args.name as string,
-          path: args.path as string,
-          components: args.components as FormioComponent[],
+          path: mcpPath,
+          components,
           display: (args.display as 'form' | 'wizard' | 'pdf') || 'form',
           type: (args.type as 'form' | 'resource') || 'form'
         };
@@ -284,6 +335,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'update_form': {
+        // First, fetch the form to verify MCP ownership
+        const existingForm = await formioClient.getForm(args.formId as string);
+        validateMCPOwnership(existingForm, 'update');
+
         const updatedForm = await formioClient.updateForm(
           args.formId as string,
           args.updates as Partial<FormioForm>
@@ -300,6 +355,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'delete_form': {
+        // First, fetch the form to verify MCP ownership
+        const existingForm = await formioClient.getForm(args.formId as string);
+        validateMCPOwnership(existingForm, 'delete');
+
         await formioClient.deleteForm(args.formId as string);
 
         return {
@@ -351,16 +410,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Error: ${errorMessage}`
-        }
-      ],
-      isError: true
-    };
+    // Log error for debugging
+    if (error instanceof Error) {
+      console.error('Tool execution error:', error.message);
+    } else if (typeof error === 'object' && error !== null) {
+      console.error('Tool execution error:', JSON.stringify(error, null, 2));
+    } else {
+      console.error('Tool execution error:', String(error));
+    }
+
+    // Re-throw to let MCP SDK handle the JSON-RPC error response
+    throw error;
   }
 });
 

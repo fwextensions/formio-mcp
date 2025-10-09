@@ -15,7 +15,6 @@ export class FormioClient {
   private client: AxiosInstance;
 
   constructor(config: FormioConfig) {
-
     this.client = axios.create({
       baseURL: config.projectUrl,
       headers: {
