@@ -35,11 +35,16 @@ export function createHttpServer(
   // Global Middleware
   // ============================================
 
+  // CORS - must be first to handle preflight
+  app.use(createCorsMiddleware(config));
+
+  // Explicit OPTIONS handler for all routes
+  app.options('*', (_req, res) => {
+    res.sendStatus(200);
+  });
+
   // Security headers
   app.use(createHelmetMiddleware());
-
-  // CORS
-  app.use(createCorsMiddleware(config));
 
   // Parse JSON bodies
   app.use(express.json());
@@ -49,7 +54,7 @@ export function createHttpServer(
 
   // Request logging
   app.use((req, _res, next) => {
-    console.log(`[HTTP] ${req.method} ${req.path} from ${req.ip}`);
+    console.log(`[HTTP] ${req.method} ${req.path} from ${req.ip} - Origin: ${req.headers.origin || 'none'}`);
     next();
   });
 
@@ -113,7 +118,53 @@ export function createHttpServer(
   );
 
   /**
-   * Messages endpoint - receives JSON-RPC requests
+   * Direct JSON-RPC endpoint - simple request/response (no SSE required)
+   * This is for MCP clients that don't use SSE streaming
+   */
+  const directEndpoint = config.basePath;
+  console.log(`[HTTP] Registering direct JSON-RPC endpoint: POST ${directEndpoint}`);
+
+  app.post(
+    directEndpoint,
+    createAuthMiddleware(config),
+    async (req: Request, res: Response) => {
+      console.log(`[HTTP] Direct endpoint hit: ${req.method} ${req.path}`);
+      console.log(`[HTTP] Request body:`, JSON.stringify(req.body).slice(0, 200));
+
+      try {
+        const message = req.body;
+
+        // Validate JSON-RPC message
+        if (!message || !message.jsonrpc || message.jsonrpc !== '2.0') {
+          return res.status(400).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32600,
+              message: 'Invalid JSON-RPC 2.0 request'
+            }
+          });
+        }
+
+        // Process request and return response directly
+        const response = await transport.handleRequestSync(message);
+        return res.json(response);
+
+      } catch (err) {
+        console.error('[HTTP] Error processing message:', err);
+        return res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal server error'
+          }
+        });
+      }
+    }
+  );
+
+  /**
+   * Messages endpoint - receives JSON-RPC requests (with SSE)
+   * This is for clients using SSE streaming
    */
   app.post(
     `${config.basePath}/messages`,

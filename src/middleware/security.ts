@@ -10,33 +10,11 @@ import { HttpConfig } from '../config/http-config.js';
 
 /**
  * Create CORS middleware
- * Supports wildcard patterns in origin configuration
+ * Allow all origins (CORS enforcement disabled)
  */
-export function createCorsMiddleware(config: HttpConfig) {
+export function createCorsMiddleware(_config: HttpConfig) {
   return cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, Postman)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      // Check against configured origins (supports wildcards)
-      const allowed = config.corsOrigins.some(pattern => {
-        // Convert wildcard pattern to regex
-        // e.g., "http://localhost:*" becomes /^http:\/\/localhost:.*$/
-        const regexPattern = pattern
-          .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // Escape special chars
-          .replace(/\*/g, '.*'); // Convert * to .*
-        const regex = new RegExp(`^${regexPattern}$`);
-        return regex.test(origin);
-      });
-
-      if (allowed) {
-        callback(null, true);
-      } else {
-        callback(new Error(`Origin ${origin} not allowed by CORS`));
-      }
-    },
+    origin: true, // Allow all origins
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Connection-ID'],

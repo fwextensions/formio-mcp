@@ -31,19 +31,14 @@ export class HttpTransport {
   }
 
   /**
-   * Handle incoming JSON-RPC request
+   * Handle incoming JSON-RPC request synchronously (no SSE required)
+   * Returns the response directly for simple request/response pattern
    */
-  async handleRequest(connectionId: string, message: JSONRPCMessage): Promise<void> {
-    console.log(`[HTTP Transport] Handling request from ${connectionId}:`, {
+  async handleRequestSync(message: JSONRPCMessage): Promise<JSONRPCResponse> {
+    console.log(`[HTTP Transport] Handling sync request:`, {
       method: (message as any).method,
       id: (message as any).id
     });
-
-    // Verify connection exists
-    if (!this.sseManager.hasConnection(connectionId)) {
-      console.error(`[HTTP Transport] Connection ${connectionId} not found`);
-      return;
-    }
 
     try {
       // Validate it's a request (has method property)
@@ -58,40 +53,53 @@ export class HttpTransport {
 
       if (!handler) {
         // Method not found
-        const errorResponse: any = {
+        return {
           jsonrpc: '2.0',
           id: request.id,
           error: {
             code: -32601,
             message: `Method not found: ${request.method}`
           }
-        };
-
-        this.sendResponse(connectionId, errorResponse);
-        return;
+        } as any;
       }
 
-      // Execute handler
+      // Execute handler and return response
       const response = await handler(request);
-
-      // Send response via SSE
-      this.sendResponse(connectionId, response);
+      return response;
 
     } catch (err) {
-      console.error('[HTTP Transport] Error handling request:', err);
+      console.error('[HTTP Transport] Error handling sync request:', err);
 
-      // Send error response
-      const errorResponse: any = {
+      // Return error response
+      return {
         jsonrpc: '2.0',
         id: (message as any).id || null,
         error: {
           code: -32603,
           message: err instanceof Error ? err.message : 'Internal error'
         }
-      };
-
-      this.sendResponse(connectionId, errorResponse);
+      } as any;
     }
+  }
+
+  /**
+   * Handle incoming JSON-RPC request (via SSE)
+   */
+  async handleRequest(connectionId: string, message: JSONRPCMessage): Promise<void> {
+    console.log(`[HTTP Transport] Handling request from ${connectionId}:`, {
+      method: (message as any).method,
+      id: (message as any).id
+    });
+
+    // Verify connection exists
+    if (!this.sseManager.hasConnection(connectionId)) {
+      console.error(`[HTTP Transport] Connection ${connectionId} not found`);
+      return;
+    }
+
+    // Use sync handler and send response via SSE
+    const response = await this.handleRequestSync(message);
+    this.sendResponse(connectionId, response);
   }
 
   /**

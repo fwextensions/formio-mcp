@@ -468,8 +468,40 @@ async function main() {
     // Create HTTP transport
     const httpTransport = new HttpTransport(server, sseManager);
 
-    // Register tool handlers with HTTP transport
-    // The handlers will process requests and send responses via SSE
+    // Register MCP protocol handlers with HTTP transport
+
+    // Initialize handler - required for MCP handshake
+    httpTransport.registerHandler('initialize', async (request) => {
+      console.log('[HTTP] Handling initialize request');
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          protocolVersion: '2025-06-18',
+          capabilities: {
+            tools: {
+              listChanged: true
+            }
+          },
+          serverInfo: {
+            name: 'formio-mcp-server',
+            version: '1.0.0'
+          }
+        }
+      };
+    });
+
+    // Notifications/initialized handler
+    httpTransport.registerHandler('notifications/initialized', async (request) => {
+      console.log('[HTTP] Client initialization complete');
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {}
+      };
+    });
+
+    // Tools list handler
     httpTransport.registerHandler('tools/list', async (request) => {
       return {
         jsonrpc: '2.0',
@@ -478,6 +510,7 @@ async function main() {
       };
     });
 
+    // Tools call handler
     httpTransport.registerHandler('tools/call', async (request) => {
       // Reuse the existing tool call handler logic
       const { name, arguments: toolArgs } = request.params as any;
