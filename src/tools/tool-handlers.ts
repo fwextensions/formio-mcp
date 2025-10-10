@@ -192,6 +192,29 @@ export async function executeToolCall(
       };
     }
 
+    case 'get_form_preview_url': {
+      // Validate form exists
+      const form = await formioClient.getForm(args.formId as string);
+
+      // Get server configuration from environment variables
+      const host = process.env.MCP_HTTP_HOST || 'localhost';
+      const port = process.env.MCP_HTTP_PORT || '44844';
+
+      // Construct preview URL (at root level, not under MCP basePath)
+      const formPath = form.path || 'unknown';
+      const formId = form._id;
+      const previewUrl = `http://${host}:${port}/form/${formPath}/${formId}`;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Form preview URL: ${previewUrl}\n\nForm Details:\n- Title: ${form.title}\n- Path: ${form.path}\n- ID: ${form._id}\n\nOpen this URL in your browser to view the rendered form.`
+          }
+        ]
+      };
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

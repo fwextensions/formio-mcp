@@ -433,6 +433,98 @@ Helper tool to create properly structured form components.
 - `defaultValue` (optional): Default value
 - `properties` (optional): Additional component-specific properties
 
+### `get_form_preview_url`
+Generate a browser-accessible preview URL for a form. This tool returns a complete URL that can be opened in a web browser to view the rendered form with default styling.
+
+**Parameters:**
+- `formId` (required): The form ID or path to generate a preview URL for
+
+**Returns:**
+A preview URL in the format: `http://{host}:{port}{basePath}/form/{formPath}/{formId}`
+
+**Example Response:**
+```
+Form preview URL: http://localhost:44844/mcp/v1/form/contact/507f1f77bcf86cd799439011
+
+Form: Contact Form
+Path: contact
+ID: 507f1f77bcf86cd799439011
+```
+
+## Form Preview Feature
+
+The Form.io MCP Server includes a web-based form preview feature that allows you to visualize forms in a browser. This is particularly useful for quickly validating form structure, layout, and appearance during development.
+
+### How It Works
+
+1. **Create or identify a form** using the MCP tools
+2. **Generate a preview URL** using the `get_form_preview_url` tool
+3. **Open the URL in a browser** to see the rendered form
+
+The preview page fetches the form JSON from your Form.io server and renders it using the official Form.io JavaScript library with default styling.
+
+### URL Format
+
+Preview URLs follow this format:
+```
+http://{host}:{port}{basePath}/form/{formPath}/{formId}
+```
+
+Example:
+```
+http://localhost:44844/mcp/v1/form/mcp-contact/507f1f77bcf86cd799439011
+```
+
+### Features
+
+- **Interactive Preview**: Forms are fully interactive - you can fill fields, trigger validation, and see how components behave
+- **Default Styling**: Forms are rendered with Form.io's default CSS, providing a clean, professional appearance
+- **No Authentication Required**: Preview endpoints are publicly accessible for easy sharing (when running in HTTP mode)
+- **Error Handling**: Clear error pages for missing forms or API failures
+
+### Example Usage
+
+**Using with Claude Desktop (STDIO mode):**
+```
+You: "Create a contact form with name, email, and message fields"
+Claude: [Creates the form]
+You: "Generate a preview URL for this form"
+Claude: [Returns preview URL]
+You: [Open the URL in your browser to see the form]
+```
+
+**Using with HTTP mode:**
+```bash
+# 1. Start the server in HTTP mode
+npm run start:http
+
+# 2. Create a form via MCP tools
+# 3. Call get_form_preview_url tool with the form ID
+# 4. Open the returned URL in your browser
+```
+
+### Preview Behavior
+
+- **Form Interaction**: All form components are interactive and functional
+- **Validation**: Client-side validation rules are active and will display errors
+- **Submission**: Form submission is disabled in preview mode - clicking submit will show an alert message
+- **Responsive**: Preview pages adapt to different screen sizes
+
+### Security Considerations
+
+**Public Access**: When running in HTTP mode, preview endpoints are intentionally public (no authentication required) to allow easy sharing of form previews. This means:
+
+- ✅ Anyone with the preview URL can view the form structure
+- ✅ Forms don't contain sensitive data - only the structure and configuration
+- ❌ Form submissions are disabled in preview mode
+- ❌ No user data or API credentials are exposed
+
+**Important**: Preview URLs expose the structure of your forms (field names, validation rules, layout). Only share preview URLs with trusted parties. The preview feature does not expose any submitted data or allow modifications to forms.
+
+### Future Enhancements
+
+**Real-Time Updates** (planned): In a future release, preview pages will automatically refresh when forms are modified through the MCP server, eliminating the need to manually reload the page. This will enable a seamless live-editing experience where changes made via AI tools are instantly visible in the browser.
+
 ## Example Interactions
 
 Once configured in Claude Desktop, you can interact with your forms using natural language:

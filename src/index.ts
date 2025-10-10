@@ -1,4 +1,4 @@
-ds#!/usr/bin / env node
+#!/usr/bin/env node
 
 /**
  * Form.io MCP Server
@@ -24,7 +24,6 @@ import { SSEManager } from './transport/sse-manager.js';
 import { HttpTransport } from './transport/http-transport.js';
 import { createHttpServer } from './server/http-server.js';
 import { executeToolCall } from './tools/tool-handlers.js';
-import { env } from 'process';
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -204,6 +203,20 @@ const TOOLS: Tool[] = [
       },
       required: ['type', 'key', 'label']
     }
+  },
+  {
+    name: 'get_form_preview_url',
+    description: 'Generate a browser-accessible preview URL for a Form.io form. Returns a complete URL that can be opened in a browser to view the rendered form with default styling. The preview shows the form structure and allows interaction but does not submit data to the server.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        formId: {
+          type: 'string',
+          description: 'The form ID or path to generate a preview URL for'
+        }
+      },
+      required: ['formId']
+    }
   }
 ];
 
@@ -346,7 +359,8 @@ async function main() {
     // Create Express app
     const app = createHttpServer(config, {
       sseManager,
-      transport: httpTransport
+      transport: httpTransport,
+      formioClient
     });
 
     // Start HTTP server and track the instance

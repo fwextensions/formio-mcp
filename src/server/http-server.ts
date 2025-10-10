@@ -18,10 +18,13 @@ import {
 } from '../middleware/security.js';
 import { errorHandler, notFoundHandler } from '../middleware/error-handler.js';
 import { loggingMiddleware } from '../middleware/logging.js';
+import { createFormPreviewRoutes } from '../routes/form-preview.js';
+import { FormioClient } from '../utils/formio-client.js';
 
 export interface HttpServerDependencies {
   sseManager: SSEManager;
   transport: HttpTransport;
+  formioClient: FormioClient;
 }
 
 /**
@@ -64,6 +67,13 @@ export function createHttpServer(
 
   // Comprehensive request/response logging
   app.use(loggingMiddleware);
+
+  // ============================================
+  // Static Files (public assets)
+  // ============================================
+
+  // Serve static files from public directory (at root level)
+  app.use('/public', express.static('public'));
 
   // ============================================
   // Public Endpoints (no auth)
@@ -167,14 +177,14 @@ export function createHttpServer(
 
         // Process request and return response directly
         const response = await transport.handleRequestSync(message);
-        
+
         console.log(`[HTTP] Direct endpoint response:`, JSON.stringify(response).slice(0, 200));
-        
+
         return res.json(response);
 
       } catch (err) {
         console.error('[HTTP] Error processing message:', err);
-        
+
         return res.status(500).json({
           jsonrpc: '2.0',
           error: {
@@ -258,6 +268,22 @@ export function createHttpServer(
       }
     }
   );
+
+  // ============================================
+  // Form Preview Routes (public, no auth, at root level)
+  // ============================================
+
+  const previewRoutes = createFormPreviewRoutes({
+    formioClient: deps.formioClient,
+    serverConfig: {
+      host: config.host,
+      port: config.port,
+      basePath: '' // Preview routes are at root level
+    }
+  });
+
+  // Mount preview routes at root (not under MCP basePath)
+  app.use('/', previewRoutes);
 
   // ============================================
   // Error Handlers (must be last)
