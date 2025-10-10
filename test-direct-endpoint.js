@@ -14,7 +14,7 @@
  * - Requests with and without Origin header work
  */
 
-const http = require('http');
+import http from 'http';
 
 const PORT = process.env.PORT || 3000;
 const HOST = 'localhost';
@@ -77,7 +77,8 @@ async function testDirectEndpoint() {
         console.log('Response:', JSON.stringify(response.body, null, 2).slice(0, 200));
         console.log('✓ Test passed');
     } catch (err) {
-        console.error('✗ Test failed:', err.message);
+        console.error('✗ Test failed:', err.message || err);
+        console.error('Make sure the server is running: npm run start:http');
     }
 
     // Test 2: Valid JSON-RPC request without Origin header

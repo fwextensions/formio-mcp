@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+ds#!/usr/bin / env node
 
 /**
  * Form.io MCP Server
@@ -19,11 +19,12 @@ import {
   Tool
 } from '@modelcontextprotocol/sdk/types.js';
 import { FormioClient } from './utils/formio-client.js';
-import type { FormioForm, FormioComponent } from './types/formio.js';
 import { loadHttpConfig, validateHttpConfig } from './config/http-config.js';
 import { SSEManager } from './transport/sse-manager.js';
 import { HttpTransport } from './transport/http-transport.js';
 import { createHttpServer } from './server/http-server.js';
+import { executeToolCall } from './tools/tool-handlers.js';
+import { env } from 'process';
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -36,24 +37,6 @@ const FORMIO_TOKEN = process.env.FORMIO_TOKEN;
 
 if (!FORMIO_PROJECT_URL) {
   throw new Error('FORMIO_PROJECT_URL environment variable is required');
-}
-
-// MCP form identification prefixes
-const MCP_PATH_PREFIX = 'mcp-';
-const MCP_TITLE_PREFIX = '[MCP] ';
-
-// Helper functions for MCP form validation
-function isMCPForm(form: FormioForm): boolean {
-  return form.path?.startsWith(MCP_PATH_PREFIX) || form.title?.startsWith(MCP_TITLE_PREFIX);
-}
-
-function validateMCPOwnership(form: FormioForm, operation: string): void {
-  if (!isMCPForm(form)) {
-    throw new Error(
-      `Cannot ${operation} form "${form.title || form.name}": This form was not created by MCP. ` +
-      `MCP can only ${operation} forms it created (prefixed with "${MCP_TITLE_PREFIX}" or path starting with "${MCP_PATH_PREFIX}").`
-    );
-  }
 }
 
 // Initialize Form.io client
@@ -252,175 +235,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       throw new Error('Missing arguments');
     }
 
-    switch (name) {
-      case 'list_forms': {
-        const forms = await formioClient.listForms({
-          limit: args.limit as number || 100,
-          skip: args.skip as number || 0
-        });
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                forms.map(f => ({
-                  id: f._id,
-                  title: f.title,
-                  name: f.name,
-                  path: f.path,
-                  type: f.type,
-                  modified: f.modified
-                })),
-                null,
-                2
-              )
-            }
-          ]
-        };
-      }
-
-      case 'get_form': {
-        const form = await formioClient.getForm(args.formId as string);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(form, null, 2)
-            }
-          ]
-        };
-      }
-
-      case 'create_form': {
-        const title = args.title as string;
-        let path = args.path as string;
-
-        // Normalize path to meet Form.io requirements:
-        // - Only letters, numbers, hyphens, and forward slashes
-        // - Cannot start or end with hyphen or forward slash
-        // - Must be lowercase
-        path = path
-          .toLowerCase()
-          .replace(/[^a-z0-9\-\/]/g, '') // Remove invalid characters
-          .replace(/^[\-\/]+|[\-\/]+$/g, ''); // Remove leading/trailing hyphens or slashes
-
-        if (!path) {
-          throw new Error('Invalid path: after normalization, path is empty. Path must contain letters or numbers.');
-        }
-
-        // Handle components - if it's an object with a components property, extract the array
-        let components: FormioComponent[];
-        if (Array.isArray(args.components)) {
-          components = args.components as FormioComponent[];
-        } else if (typeof args.components === 'object' && args.components !== null && 'components' in args.components) {
-          // Model passed entire form structure as components param
-          components = (args.components as any).components as FormioComponent[];
-        } else {
-          throw new Error('Invalid components parameter: must be an array of component objects');
-        }
-
-        // Prepend MCP prefixes to identify forms created by MCP
-        const mcpTitle = title.startsWith(MCP_TITLE_PREFIX) ? title : `${MCP_TITLE_PREFIX}${title}`;
-        const mcpPath = path.startsWith(MCP_PATH_PREFIX) ? path : `${MCP_PATH_PREFIX}${path}`;
-
-        const formData: Omit<FormioForm, '_id' | 'created' | 'modified'> = {
-          title: mcpTitle,
-          name: args.name as string,
-          path: mcpPath,
-          components,
-          display: (args.display as 'form' | 'wizard' | 'pdf') || 'form',
-          type: (args.type as 'form' | 'resource') || 'form'
-        };
-
-        const createdForm = await formioClient.createForm(formData);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Form created successfully!\n\n${JSON.stringify(createdForm, null, 2)}`
-            }
-          ]
-        };
-      }
-
-      case 'update_form': {
-        // First, fetch the form to verify MCP ownership
-        const existingForm = await formioClient.getForm(args.formId as string);
-        validateMCPOwnership(existingForm, 'update');
-
-        const updatedForm = await formioClient.updateForm(
-          args.formId as string,
-          args.updates as Partial<FormioForm>
-        );
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Form updated successfully!\n\n${JSON.stringify(updatedForm, null, 2)}`
-            }
-          ]
-        };
-      }
-
-      case 'delete_form': {
-        // First, fetch the form to verify MCP ownership
-        const existingForm = await formioClient.getForm(args.formId as string);
-        validateMCPOwnership(existingForm, 'delete');
-
-        await formioClient.deleteForm(args.formId as string);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Form ${args.formId} deleted successfully.`
-            }
-          ]
-        };
-      }
-
-      case 'create_form_component': {
-        const component: FormioComponent = {
-          type: args.type as string,
-          key: args.key as string,
-          label: args.label as string,
-          input: true,
-          tableView: true
-        };
-
-        if (args.required !== undefined) {
-          component.validate = { required: args.required as boolean };
-        }
-        if (args.placeholder) {
-          component.placeholder = args.placeholder as string;
-        }
-        if (args.description) {
-          component.description = args.description as string;
-        }
-        if (args.defaultValue !== undefined) {
-          component.defaultValue = args.defaultValue;
-        }
-        if (args.properties) {
-          Object.assign(component, args.properties as object);
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(component, null, 2)
-            }
-          ]
-        };
-      }
-
-      default:
-        throw new Error(`Unknown tool: ${name}`);
-    }
+    return await executeToolCall(formioClient, name, args);
   } catch (error) {
     // Log error for debugging
     if (error instanceof Error) {
@@ -512,25 +327,20 @@ async function main() {
 
     // Tools call handler
     httpTransport.registerHandler('tools/call', async (request) => {
-      // Reuse the existing tool call handler logic
+      // Execute tool logic directly (can't use server.request in HTTP mode since server isn't connected)
       const { name, arguments: toolArgs } = request.params as any;
 
       if (!toolArgs) {
         throw new Error('Missing arguments');
       }
 
-      // Execute the tool (this uses the existing switch statement logic)
-      // We'll call the CallToolRequestSchema handler
-      const result = await server.request(
-        { method: 'tools/call', params: { name, arguments: toolArgs } },
-        CallToolRequestSchema
-      );
+      const result = await executeToolCall(formioClient, name, toolArgs);
 
       return {
         jsonrpc: '2.0',
         id: request.id,
         result
-      };
+      } as any;
     });
 
     // Create Express app
