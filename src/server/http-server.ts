@@ -19,12 +19,15 @@ import {
 import { errorHandler, notFoundHandler } from '../middleware/error-handler.js';
 import { loggingMiddleware } from '../middleware/logging.js';
 import { createFormPreviewRoutes } from '../routes/form-preview.js';
+import { createPreviewUpdatesRoutes } from '../routes/preview-updates.js';
 import { FormioClient } from '../utils/formio-client.js';
+import { FormUpdateNotifier } from '../services/form-update-notifier.js';
 
 export interface HttpServerDependencies {
   sseManager: SSEManager;
   transport: HttpTransport;
   formioClient: FormioClient;
+  formUpdateNotifier: FormUpdateNotifier;
 }
 
 /**
@@ -284,6 +287,19 @@ export function createHttpServer(
 
   // Mount preview routes at root (not under MCP basePath)
   app.use('/', previewRoutes);
+
+  // ============================================
+  // Preview Updates Routes (SSE for real-time form updates)
+  // ============================================
+
+  const previewUpdatesRoutes = createPreviewUpdatesRoutes({
+    sseManager,
+    formUpdateNotifier: deps.formUpdateNotifier,
+    maxPreviewConnections: config.maxPreviewConnections
+  });
+
+  // Mount preview updates routes at root (not under MCP basePath)
+  app.use('/', previewUpdatesRoutes);
 
   // ============================================
   // Error Handlers (must be last)

@@ -23,6 +23,11 @@ export interface HttpConfig {
   // SSE
   sseHeartbeatInterval: number;
   sseTimeout: number;
+
+  // Preview connections
+  maxPreviewConnections: number;
+  previewIdleTimeout: number;
+  updateDebounceInterval: number;
 }
 
 /**
@@ -49,6 +54,11 @@ export function loadHttpConfig(): HttpConfig {
     // SSE configuration
     sseHeartbeatInterval: parseInt(process.env.MCP_SSE_HEARTBEAT_MS || '30000', 10),
     sseTimeout: parseInt(process.env.MCP_SSE_TIMEOUT_MS || '300000', 10),
+
+    // Preview connection configuration
+    maxPreviewConnections: parseInt(process.env.MCP_MAX_PREVIEW_CONNECTIONS || '100', 10),
+    previewIdleTimeout: parseInt(process.env.MCP_PREVIEW_IDLE_TIMEOUT || '300000', 10),
+    updateDebounceInterval: parseInt(process.env.MCP_UPDATE_DEBOUNCE_INTERVAL || '500', 10),
   };
 }
 
@@ -76,6 +86,18 @@ export function validateHttpConfig(config: HttpConfig): { valid: boolean; errors
 
   if (config.sseHeartbeatInterval < 5000) {
     errors.push('SSE heartbeat interval must be at least 5000ms');
+  }
+
+  if (config.maxPreviewConnections < 1) {
+    errors.push('Max preview connections must be at least 1');
+  }
+
+  if (config.previewIdleTimeout < 60000) {
+    errors.push('Preview idle timeout must be at least 60000ms (1 minute)');
+  }
+
+  if (config.updateDebounceInterval < 0) {
+    errors.push('Update debounce interval must be non-negative');
   }
 
   return {

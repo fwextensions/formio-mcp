@@ -5,6 +5,7 @@
 
 import { FormioClient } from '../utils/formio-client.js';
 import type { FormioForm, FormioComponent } from '../types/formio.js';
+import { FormUpdateNotifier } from '../services/form-update-notifier.js';
 
 // MCP form identification prefixes
 const MCP_PATH_PREFIX = 'mcp-';
@@ -30,7 +31,8 @@ function validateMCPOwnership(form: FormioForm, operation: string): void {
 export async function executeToolCall(
   formioClient: FormioClient,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  formUpdateNotifier?: FormUpdateNotifier
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   switch (name) {
     case 'list_forms': {
@@ -112,6 +114,28 @@ export async function executeToolCall(
 
       const createdForm = await formioClient.createForm(formData);
 
+      // Notify preview connections about the new form
+      // Requirements: 5.1 - Log form update events
+      if (formUpdateNotifier && createdForm._id) {
+        try {
+          console.log('[Tool Handler] Sending form created notification:', {
+            timestamp: new Date().toISOString(),
+            formId: createdForm._id,
+            formTitle: createdForm.title,
+            formPath: createdForm.path,
+            action: 'notify_created'
+          });
+          formUpdateNotifier.notifyFormCreated(createdForm._id, createdForm);
+        } catch (error) {
+          console.error('[Tool Handler] Failed to send form created notification:', {
+            timestamp: new Date().toISOString(),
+            formId: createdForm._id,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          // Continue execution - notification failure should not break tool execution
+        }
+      }
+
       return {
         content: [
           {
@@ -131,6 +155,28 @@ export async function executeToolCall(
         args.updates as Partial<FormioForm>
       );
 
+      // Notify preview connections about the form update
+      // Requirements: 5.1 - Log form update events
+      if (formUpdateNotifier && updatedForm._id) {
+        try {
+          console.log('[Tool Handler] Sending form updated notification:', {
+            timestamp: new Date().toISOString(),
+            formId: updatedForm._id,
+            formTitle: updatedForm.title,
+            formPath: updatedForm.path,
+            action: 'notify_updated'
+          });
+          formUpdateNotifier.notifyFormUpdated(updatedForm._id, updatedForm);
+        } catch (error) {
+          console.error('[Tool Handler] Failed to send form updated notification:', {
+            timestamp: new Date().toISOString(),
+            formId: updatedForm._id,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          // Continue execution - notification failure should not break tool execution
+        }
+      }
+
       return {
         content: [
           {
@@ -145,13 +191,34 @@ export async function executeToolCall(
       const existingForm = await formioClient.getForm(args.formId as string);
       validateMCPOwnership(existingForm, 'delete');
 
-      await formioClient.deleteForm(args.formId as string);
+      const formId = args.formId as string;
+      await formioClient.deleteForm(formId);
+
+      // Notify preview connections about the form deletion
+      // Requirements: 5.1 - Log form update events
+      if (formUpdateNotifier) {
+        try {
+          console.log('[Tool Handler] Sending form deleted notification:', {
+            timestamp: new Date().toISOString(),
+            formId,
+            action: 'notify_deleted'
+          });
+          formUpdateNotifier.notifyFormDeleted(formId);
+        } catch (error) {
+          console.error('[Tool Handler] Failed to send form deleted notification:', {
+            timestamp: new Date().toISOString(),
+            formId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          // Continue execution - notification failure should not break tool execution
+        }
+      }
 
       return {
         content: [
           {
             type: 'text',
-            text: `Form ${args.formId} deleted successfully.`
+            text: `Form ${formId} deleted successfully.`
           }
         ]
       };

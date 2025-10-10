@@ -124,9 +124,23 @@ export class SSEManager {
   }
 
   /**
+   * Send a form update event to a specific connection
+   */
+  sendFormUpdateEvent(connectionId: string, data: { formId: string; timestamp: string; changeType: 'created' | 'updated' | 'deleted' }): boolean {
+    return this.sendEvent(connectionId, 'form-update', data);
+  }
+
+  /**
+   * Send a form deleted event to a specific connection
+   */
+  sendFormDeletedEvent(connectionId: string, data: { formId: string; timestamp: string }): boolean {
+    return this.sendEvent(connectionId, 'form-deleted', data);
+  }
+
+  /**
    * Send an SSE event to a specific connection
    */
-  private sendEvent(connectionId: string, event: string, data: object): boolean {
+  sendEvent(connectionId: string, event: string, data: object): boolean {
     const conn = this.connections.get(connectionId);
     if (!conn) {
       console.warn(`[SSE] Cannot send event to ${connectionId}: connection not found`);

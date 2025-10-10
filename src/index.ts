@@ -24,6 +24,7 @@ import { SSEManager } from './transport/sse-manager.js';
 import { HttpTransport } from './transport/http-transport.js';
 import { createHttpServer } from './server/http-server.js';
 import { executeToolCall } from './tools/tool-handlers.js';
+import { FormUpdateNotifier } from './services/form-update-notifier.js';
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -235,6 +236,9 @@ const server = new Server(
   }
 );
 
+// Shared FormUpdateNotifier instance (will be set in HTTP mode)
+let sharedFormUpdateNotifier: FormUpdateNotifier | undefined = undefined;
+
 // Tool handlers
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: TOOLS };
@@ -248,7 +252,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       throw new Error('Missing arguments');
     }
 
-    return await executeToolCall(formioClient, name, args);
+    // Use shared formUpdateNotifier if available (HTTP mode with stdio client)
+    // This allows stdio clients to trigger real-time updates when HTTP server is running
+    return await executeToolCall(formioClient, name, args, sharedFormUpdateNotifier);
   } catch (error) {
     // Log error for debugging
     if (error instanceof Error) {
@@ -292,6 +298,28 @@ async function main() {
 
     // Create SSE manager
     const sseManager = new SSEManager(config.sseHeartbeatInterval);
+
+    // Create FormUpdateNotifier for real-time form updates
+    const formUpdateNotifier = new FormUpdateNotifier(
+      sseManager,
+      config.updateDebounceInterval,
+      config.previewIdleTimeout
+    );
+
+    // Share the notifier with stdio handler so stdio clients can trigger updates
+    sharedFormUpdateNotifier = formUpdateNotifier;
+
+    console.error('[MCP] FormUpdateNotifier initialized:', {
+      debounceInterval: config.updateDebounceInterval,
+      idleTimeout: config.previewIdleTimeout,
+      maxConnections: config.maxPreviewConnections
+    });
+
+    // Start periodic metrics logging (every 5 minutes)
+    // Requirements: 6.4 - Add metrics tracking for active connections
+    const metricsInterval = setInterval(() => {
+      formUpdateNotifier.logMetrics();
+    }, 5 * 60 * 1000); // 5 minutes
 
     // Create HTTP transport
     const httpTransport = new HttpTransport(server, sseManager);
@@ -347,7 +375,8 @@ async function main() {
         throw new Error('Missing arguments');
       }
 
-      const result = await executeToolCall(formioClient, name, toolArgs);
+      // Pass formUpdateNotifier to enable real-time form updates
+      const result = await executeToolCall(formioClient, name, toolArgs, formUpdateNotifier);
 
       return {
         jsonrpc: '2.0',
@@ -360,7 +389,8 @@ async function main() {
     const app = createHttpServer(config, {
       sseManager,
       transport: httpTransport,
-      formioClient
+      formioClient,
+      formUpdateNotifier
     });
 
     // Start HTTP server and track the instance
@@ -386,13 +416,22 @@ async function main() {
       isShuttingDown = true;
       console.error(`\n[MCP] Received ${signal}, starting graceful shutdown...`);
 
-      // Step 1: Close all SSE connections
+      // Step 1: Stop metrics logging
+      console.error('[MCP] Stopping metrics logging...');
+      clearInterval(metricsInterval);
+
+      // Step 2: Cleanup FormUpdateNotifier (clear pending notifications)
+      console.error('[MCP] Cleaning up FormUpdateNotifier...');
+      formUpdateNotifier.cleanup();
+      console.error('[MCP] FormUpdateNotifier cleanup complete');
+
+      // Step 3: Close all SSE connections
       console.error('[MCP] Closing SSE connections...');
       const connectionCount = sseManager.getConnectionCount();
       sseManager.cleanup();
       console.error(`[MCP] Closed ${connectionCount} SSE connection(s)`);
 
-      // Step 2: Close HTTP server (stops accepting new connections)
+      // Step 4: Close HTTP server (stops accepting new connections)
       console.error('[MCP] Closing HTTP server...');
       httpServer.close((err) => {
         if (err) {
@@ -405,7 +444,7 @@ async function main() {
         }
       });
 
-      // Step 3: Force exit after timeout if graceful shutdown hangs
+      // Step 5: Force exit after timeout if graceful shutdown hangs
       setTimeout(() => {
         console.error('[MCP] Graceful shutdown timeout exceeded, forcing exit...');
         process.exit(1);

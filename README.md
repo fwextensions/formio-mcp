@@ -294,6 +294,9 @@ All HTTP settings can be configured via environment variables:
 | `MCP_RATE_LIMIT_MAX` | `100` | Max requests per window |
 | `MCP_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `MCP_SSE_TIMEOUT_MS` | `300000` | SSE connection timeout (ms) |
+| `MCP_MAX_PREVIEW_CONNECTIONS` | `100` | Max concurrent preview connections |
+| `MCP_PREVIEW_IDLE_TIMEOUT` | `300000` | Preview connection idle timeout (ms) |
+| `MCP_UPDATE_DEBOUNCE_INTERVAL` | `500` | Update notification debounce (ms) |
 
 ### Deployment
 
@@ -521,9 +524,37 @@ npm run start:http
 
 **Important**: Preview URLs expose the structure of your forms (field names, validation rules, layout). Only share preview URLs with trusted parties. The preview feature does not expose any submitted data or allow modifications to forms.
 
-### Future Enhancements
+### Real-Time Updates
 
-**Real-Time Updates** (planned): In a future release, preview pages will automatically refresh when forms are modified through the MCP server, eliminating the need to manually reload the page. This will enable a seamless live-editing experience where changes made via AI tools are instantly visible in the browser.
+Preview pages automatically refresh when forms are modified through the MCP server, eliminating the need to manually reload the page. This enables a seamless live-editing experience where changes made via AI tools are instantly visible in the browser.
+
+**How It Works:**
+1. When you open a form preview, the page establishes a Server-Sent Events (SSE) connection to the MCP server
+2. When you modify the form through MCP tools (create, update, or delete), the server notifies all connected preview pages
+3. Preview pages automatically refresh to show the latest changes
+
+**Features:**
+- **Automatic Updates**: No manual refresh needed - changes appear instantly
+- **Visual Feedback**: Brief notification shown when form is updated
+- **Reconnection**: Automatic reconnection with exponential backoff if connection is lost
+- **Connection Status**: Visual indicator shows connection state (connected/reconnecting/disconnected)
+- **Form Deletion Handling**: Clear message displayed if form is deleted while preview is open
+- **Debouncing**: Multiple rapid updates are batched to prevent excessive refreshes
+
+**Connection Management:**
+- Connections automatically reconnect if network is interrupted
+- After 5 failed reconnection attempts, a manual reconnect button is displayed
+- Idle connections are automatically closed after 5 minutes to conserve resources
+- Maximum of 100 concurrent preview connections (configurable)
+
+**Browser Compatibility:**
+Real-time updates work in all modern browsers that support Server-Sent Events (SSE):
+- Chrome/Edge 6+
+- Firefox 6+
+- Safari 5+
+- Opera 11+
+
+If SSE is not supported, the preview will still work but updates won't be automatic - you'll need to manually refresh the page.
 
 ## Example Interactions
 
@@ -594,7 +625,219 @@ formio-mcp/
 - Check that form names and paths are unique
 - Ensure required fields are provided
 
+**Real-time updates not working:**
+- **Connection indicator shows "disconnected"**: Check that the MCP server is running and accessible
+- **Updates not appearing**: Verify the form is being modified through the MCP server (not directly in Form.io UI)
+- **"Reconnecting" status persists**: Check browser console for errors; may indicate network issues or server problems
+- **"Failed to connect" message**: Ensure your browser supports Server-Sent Events (all modern browsers do)
+- **Preview shows old version after update**: Try a hard refresh (Ctrl+Shift+R or Cmd+Shift+R)
+- **Multiple preview windows not all updating**: Each window maintains its own connection; check each window's connection status
+- **Connection drops frequently**: May indicate network instability; check server logs for connection errors
+
+**Preview connection issues:**
+- **"Maximum connections reached" error**: Close unused preview windows or increase `MCP_MAX_PREVIEW_CONNECTIONS`
+- **Connection closes after 5 minutes**: This is expected for idle connections; refresh the page to reconnect
+- **Manual reconnect button appears**: Click it to retry connection, or refresh the page
+- **Server logs show connection errors**: Check firewall settings and ensure SSE endpoints are accessible
+
+**Debugging real-time updates:**
+1. Open browser DevTools (F12) and check the Console tab for errors
+2. Check the Network tab for the `/preview-updates/{formId}` connection (should show "EventStream" type)
+3. Look for SSE events in the Network tab by clicking on the connection
+4. Check server logs for notification messages and connection lifecycle events
+5. Verify the form ID in the preview URL matches the form being modified
+
 ## API Reference
+
+### FormUpdateNotifier API
+
+The `FormUpdateNotifier` service manages real-time notifications for form preview connections.
+
+**Location:** `src/services/form-update-notifier.ts`
+
+#### Methods
+
+**`registerPreviewConnection(connectionId: string, formId: string): void`**
+- Registers a preview connection to receive updates for a specific form
+- Called automatically when a preview page establishes an SSE connection
+- Parameters:
+  - `connectionId`: Unique identifier for the SSE connection
+  - `formId`: The form ID to watch for updates
+
+**`unregisterPreviewConnection(connectionId: string): void`**
+- Unregisters a preview connection and stops sending updates
+- Called automatically when a preview page closes or connection is lost
+- Parameters:
+  - `connectionId`: The connection ID to unregister
+
+**`notifyFormCreated(formId: string, formData: FormioForm): void`**
+- Notifies all preview connections watching a form that it was created
+- Called automatically by the `create_form` tool handler
+- Parameters:
+  - `formId`: The ID of the created form
+  - `formData`: The complete form object
+
+**`notifyFormUpdated(formId: string, formData: Partial<FormioForm>): void`**
+- Notifies all preview connections watching a form that it was updated
+- Called automatically by the `update_form` tool handler
+- Implements debouncing to prevent excessive notifications
+- Parameters:
+  - `formId`: The ID of the updated form
+  - `formData`: The updated form data (partial or complete)
+
+**`notifyFormDeleted(formId: string): void`**
+- Notifies all preview connections watching a form that it was deleted
+- Called automatically by the `delete_form` tool handler
+- Parameters:
+  - `formId`: The ID of the deleted form
+
+**`getConnectionsByForm(formId: string): string[]`**
+- Returns all connection IDs currently watching a specific form
+- Useful for debugging and monitoring
+- Parameters:
+  - `formId`: The form ID to query
+- Returns: Array of connection IDs
+
+**`getFormByConnection(connectionId: string): string | undefined`**
+- Returns the form ID being watched by a specific connection
+- Useful for debugging and monitoring
+- Parameters:
+  - `connectionId`: The connection ID to query
+- Returns: Form ID or undefined if connection not found
+
+**`cleanup(): void`**
+- Cleans up all connections and internal state
+- Called automatically during server shutdown
+- Should be called before server stops to ensure graceful cleanup
+
+#### Usage Example
+
+```typescript
+import { FormUpdateNotifier } from './services/form-update-notifier';
+import { SSEManager } from './transport/sse-manager';
+
+// Initialize
+const sseManager = new SSEManager();
+const notifier = new FormUpdateNotifier(sseManager);
+
+// Register a preview connection (done automatically by preview endpoint)
+notifier.registerPreviewConnection('conn-123', 'form-456');
+
+// Notify of form update (done automatically by tool handlers)
+notifier.notifyFormUpdated('form-456', { title: 'Updated Form' });
+
+// Check active connections
+const connections = notifier.getConnectionsByForm('form-456');
+console.log(`${connections.length} preview(s) watching this form`);
+
+// Cleanup on shutdown
+notifier.cleanup();
+```
+
+### FormPreviewClient API
+
+The `FormPreviewClient` is a JavaScript class embedded in preview pages that manages the client-side connection and update handling.
+
+**Location:** `src/templates/form-preview-client.js` (embedded in `form-preview.ts`)
+
+#### Constructor
+
+**`new FormPreviewClient(formId: string, formPath: string, config?: PreviewClientConfig)`**
+- Creates a new preview client instance
+- Parameters:
+  - `formId`: The form ID to watch for updates
+  - `formPath`: The form path (used for display)
+  - `config` (optional): Configuration object
+    - `maxReconnectAttempts`: Maximum reconnection attempts (default: 5)
+    - `initialReconnectDelay`: Initial reconnection delay in ms (default: 1000)
+    - `updateIndicatorDuration`: How long to show update notification in ms (default: 2000)
+
+#### Methods
+
+**`connectToUpdates(): void`**
+- Establishes SSE connection to receive form updates
+- Automatically called on page load
+- Sets up event listeners for update and delete events
+- Handles connection errors and reconnection
+
+**`disconnect(): void`**
+- Closes the SSE connection and cleans up
+- Automatically called on page unload
+- Should be called manually if you need to stop receiving updates
+
+**`handleUpdateEvent(event: MessageEvent): void`**
+- Handles form update notifications
+- Automatically refreshes the page to show latest changes
+- Shows brief update indicator before refresh
+- Called automatically when update event is received
+
+**`handleDeletedEvent(event: MessageEvent): void`**
+- Handles form deletion notifications
+- Displays message that form is no longer available
+- Closes the SSE connection
+- Called automatically when delete event is received
+
+**`reconnectWithBackoff(): void`**
+- Attempts to reconnect with exponential backoff
+- Called automatically when connection is lost
+- Increases delay between attempts (1s, 2s, 4s, 8s, 16s)
+- Shows manual reconnect button after max attempts
+
+**`showUpdateIndicator(): void`**
+- Displays brief notification that form was updated
+- Called automatically before page refresh
+- Notification disappears after 2 seconds or when page refreshes
+
+**`showConnectionStatus(status: 'connected' | 'reconnecting' | 'disconnected'): void`**
+- Updates the connection status indicator
+- Called automatically as connection state changes
+- Visual indicator helps users understand connection health
+
+#### Usage Example
+
+```javascript
+// Automatically initialized in preview pages
+const client = new FormPreviewClient('form-123', 'contact-form', {
+  maxReconnectAttempts: 5,
+  initialReconnectDelay: 1000
+});
+
+// Connect to receive updates
+client.connectToUpdates();
+
+// Manually disconnect if needed
+// client.disconnect();
+
+// Connection state is managed automatically
+// Status indicator updates as connection changes
+```
+
+#### Events Received
+
+**`form-update` event:**
+```javascript
+{
+  type: 'form-update',
+  data: {
+    formId: 'form-123',
+    timestamp: '2025-10-10T12:00:00.000Z',
+    changeType: 'updated'
+  }
+}
+```
+
+**`form-deleted` event:**
+```javascript
+{
+  type: 'form-deleted',
+  data: {
+    formId: 'form-123',
+    timestamp: '2025-10-10T12:00:00.000Z'
+  }
+}
+```
+
+### Form.io API Reference
 
 For detailed Form.io API documentation, visit:
 https://apidocs.form.io/
