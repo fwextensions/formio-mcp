@@ -25,17 +25,26 @@ export class SSEManager {
   /**
    * Register a new SSE connection
    */
-  addConnection(connectionId: string, res: Response, clientInfo?: string): void {
+  addConnection(connectionId: string, res: Response, clientInfo?: string, _origin?: string): void {
     console.log(`[SSE] New connection: ${connectionId}${clientInfo ? ` (${clientInfo})` : ''}`);
 
-    // Setup SSE headers
-    res.writeHead(200, {
+    // Build headers object with completely permissive CORS
+    const headers: Record<string, string> = {
+      // CORS headers - completely permissive
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': '*',
+      'Access-Control-Allow-Headers': '*',
+      'Access-Control-Expose-Headers': '*',
+      // SSE headers
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no', // Disable nginx buffering
       'X-Connection-ID': connectionId
-    });
+    };
+
+    // Setup SSE headers
+    res.writeHead(200, headers);
 
     // Flush headers immediately
     res.flushHeaders();
@@ -51,10 +60,10 @@ export class SSEManager {
 
     this.connections.set(connectionId, connection);
 
-    // Send initial connection event with ID
-    this.sendEvent(connectionId, 'connected', {
-      connectionId,
-      timestamp: new Date().toISOString()
+    // Send initial connection event with ID immediately after headers
+    // Using proper SSE format: event: connection\ndata: {"connectionId":"..."}\n\n
+    this.sendEvent(connectionId, 'connection', {
+      connectionId
     });
 
     // Start heartbeat if not already running
@@ -153,7 +162,8 @@ export class SSEManager {
       for (const [id, conn] of this.connections.entries()) {
         try {
           // Send heartbeat comment (SSE comments start with :)
-          const written = conn.res.write(`:heartbeat ${now.toISOString()}\n\n`);
+          // Using standard SSE comment format: `: heartbeat\n\n`
+          const written = conn.res.write(`: heartbeat\n\n`);
 
           if (written) {
             conn.lastHeartbeat = now;

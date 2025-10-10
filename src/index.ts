@@ -539,8 +539,8 @@ async function main() {
       transport: httpTransport
     });
 
-    // Start HTTP server
-    app.listen(config.port, config.host, () => {
+    // Start HTTP server and track the instance
+    const httpServer = app.listen(config.port, config.host, () => {
       console.error(`[MCP] Form.io MCP Server (HTTP) listening on http://${config.host}:${config.port}`);
       console.error(`[MCP] Endpoints:`);
       console.error(`  - Health:   http://${config.host}:${config.port}${config.basePath}/health`);
@@ -549,6 +549,48 @@ async function main() {
       console.error(`  - Messages: http://${config.host}:${config.port}${config.basePath}/messages`);
       console.error(`[MCP] Server ready to accept connections`);
     });
+
+    // Graceful shutdown handler
+    let isShuttingDown = false;
+
+    const gracefulShutdown = (signal: string) => {
+      if (isShuttingDown) {
+        console.error('[MCP] Shutdown already in progress...');
+        return;
+      }
+
+      isShuttingDown = true;
+      console.error(`\n[MCP] Received ${signal}, starting graceful shutdown...`);
+
+      // Step 1: Close all SSE connections
+      console.error('[MCP] Closing SSE connections...');
+      const connectionCount = sseManager.getConnectionCount();
+      sseManager.cleanup();
+      console.error(`[MCP] Closed ${connectionCount} SSE connection(s)`);
+
+      // Step 2: Close HTTP server (stops accepting new connections)
+      console.error('[MCP] Closing HTTP server...');
+      httpServer.close((err) => {
+        if (err) {
+          console.error('[MCP] Error closing HTTP server:', err.message);
+          process.exit(1);
+        } else {
+          console.error('[MCP] HTTP server closed successfully');
+          console.error('[MCP] Shutdown complete');
+          process.exit(0);
+        }
+      });
+
+      // Step 3: Force exit after timeout if graceful shutdown hangs
+      setTimeout(() => {
+        console.error('[MCP] Graceful shutdown timeout exceeded, forcing exit...');
+        process.exit(1);
+      }, 5000);
+    };
+
+    // Register signal handlers
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
   } else {
     // ============================================

@@ -11,10 +11,13 @@ import { HttpTransport } from '../transport/http-transport.js';
 import { createAuthMiddleware } from '../middleware/auth.js';
 import {
   createCorsMiddleware,
+  createExplicitCorsMiddleware,
   createHelmetMiddleware,
-  createRateLimitMiddleware
+  createRateLimitMiddleware,
+  logCorsConfiguration
 } from '../middleware/security.js';
 import { errorHandler, notFoundHandler } from '../middleware/error-handler.js';
+import { loggingMiddleware } from '../middleware/logging.js';
 
 export interface HttpServerDependencies {
   sseManager: SSEManager;
@@ -35,12 +38,19 @@ export function createHttpServer(
   // Global Middleware
   // ============================================
 
+  // Log CORS configuration on startup
+  logCorsConfiguration(config);
+
   // CORS - must be first to handle preflight
   app.use(createCorsMiddleware(config));
 
+  // Explicit CORS headers middleware (defense-in-depth)
+  app.use(createExplicitCorsMiddleware(config));
+
   // Explicit OPTIONS handler for all routes
   app.options('*', (_req, res) => {
-    res.sendStatus(200);
+    // CORS middleware already set headers, just return success
+    res.sendStatus(204);
   });
 
   // Security headers
@@ -52,11 +62,8 @@ export function createHttpServer(
   // Rate limiting
   app.use(createRateLimitMiddleware(config));
 
-  // Request logging
-  app.use((req, _res, next) => {
-    console.log(`[HTTP] ${req.method} ${req.path} from ${req.ip} - Origin: ${req.headers.origin || 'none'}`);
-    next();
-  });
+  // Comprehensive request/response logging
+  app.use(loggingMiddleware);
 
   // ============================================
   // Public Endpoints (no auth)
@@ -110,8 +117,11 @@ export function createHttpServer(
       const userAgent = req.headers['user-agent'] || 'unknown';
       const clientInfo = `${req.ip} - ${userAgent}`;
 
-      // Add SSE connection
-      sseManager.addConnection(connectionId, res, clientInfo);
+      // Get origin for CORS
+      const origin = req.headers.origin as string | undefined;
+
+      // Add SSE connection with origin for proper CORS handling
+      sseManager.addConnection(connectionId, res, clientInfo, origin);
 
       console.log(`[HTTP] SSE connection established: ${connectionId}`);
     }
@@ -145,12 +155,26 @@ export function createHttpServer(
           });
         }
 
+        // Check if this is a notification (no id field)
+        if (!('id' in message)) {
+          console.log(`[HTTP] Received notification: ${message.method}`);
+          // Notifications don't get responses, just acknowledge receipt
+          return res.status(202).json({
+            accepted: true,
+            notification: message.method
+          });
+        }
+
         // Process request and return response directly
         const response = await transport.handleRequestSync(message);
+        
+        console.log(`[HTTP] Direct endpoint response:`, JSON.stringify(response).slice(0, 200));
+        
         return res.json(response);
 
       } catch (err) {
         console.error('[HTTP] Error processing message:', err);
+        
         return res.status(500).json({
           jsonrpc: '2.0',
           error: {
@@ -244,18 +268,6 @@ export function createHttpServer(
 
   // Global error handler
   app.use(errorHandler);
-
-  // ============================================
-  // Cleanup on process exit
-  // ============================================
-
-  const cleanup = () => {
-    console.log('[HTTP] Shutting down server...');
-    sseManager.cleanup();
-  };
-
-  process.on('SIGTERM', cleanup);
-  process.on('SIGINT', cleanup);
 
   return app;
 }
