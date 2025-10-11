@@ -300,6 +300,46 @@ export function createHttpServer(
 
   // Mount preview updates routes at root (not under MCP basePath)
   app.use('/', previewUpdatesRoutes);
+  
+  // ============================================
+  // Internal Notification Endpoint (for stdio processes)
+  // ============================================
+  
+  /**
+   * Internal endpoint for stdio processes to trigger real-time updates
+   * This enables cross-process communication when stdio and HTTP run separately
+   */
+  app.post(`${config.basePath}/internal/notify-update`, express.json(), (req: Request, res: Response) => {
+    const { formId, changeType, timestamp } = req.body;
+    
+    if (!formId || !changeType) {
+      res.status(400).json({ error: 'Missing formId or changeType' });
+      return;
+    }
+    
+    console.log('[Internal] Received update notification from stdio process:', {
+      timestamp: timestamp || new Date().toISOString(),
+      formId,
+      changeType,
+      action: 'notify_from_stdio'
+    });
+    
+    try {
+      // Trigger notification through FormUpdateNotifier
+      if (changeType === 'created') {
+        deps.formUpdateNotifier.notifyFormCreated(formId);
+      } else if (changeType === 'updated') {
+        deps.formUpdateNotifier.notifyFormUpdated(formId);
+      } else if (changeType === 'deleted') {
+        deps.formUpdateNotifier.notifyFormDeleted(formId);
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[Internal] Error processing notification:', error);
+      res.status(500).json({ error: 'Failed to process notification' });
+    }
+  });
 
   // ============================================
   // Error Handlers (must be last)

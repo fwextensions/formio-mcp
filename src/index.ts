@@ -239,6 +239,42 @@ const server = new Server(
 // Shared FormUpdateNotifier instance (will be set in HTTP mode)
 let sharedFormUpdateNotifier: FormUpdateNotifier | undefined = undefined;
 
+// HTTP notification client for stdio mode
+// When stdio process makes changes, it notifies the HTTP server via HTTP request
+async function notifyHttpServer(
+  formId: string,
+  changeType: 'created' | 'updated' | 'deleted',
+  formData?: any
+): Promise<void> {
+  const host = process.env.MCP_HTTP_HOST || 'localhost';
+  const port = process.env.MCP_HTTP_PORT || '44844';
+  const basePath = process.env.MCP_HTTP_BASE_PATH || '/mcp';
+  
+  const url = `http://${host}:${port}${basePath}/internal/notify-update`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        formId,
+        changeType,
+        formData,
+        timestamp: new Date().toISOString()
+      })
+    });
+    
+    if (!response.ok) {
+      console.error('[STDIO] Failed to notify HTTP server:', response.status, response.statusText);
+    }
+  } catch (error) {
+    // Silently fail - HTTP server might not be running
+    // This is expected when running in stdio-only mode
+  }
+}
+
 // Tool handlers
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: TOOLS };
@@ -252,9 +288,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       throw new Error('Missing arguments');
     }
 
-    // Use shared formUpdateNotifier if available (HTTP mode with stdio client)
-    // This allows stdio clients to trigger real-time updates when HTTP server is running
-    return await executeToolCall(formioClient, name, args, sharedFormUpdateNotifier);
+    // Execute the tool
+    const result = await executeToolCall(formioClient, name, args, sharedFormUpdateNotifier);
+    
+    // If running as stdio process (not HTTP mode), notify HTTP server via HTTP request
+    // This enables cross-process communication for real-time updates
+    if (!sharedFormUpdateNotifier && (name === 'create_form' || name === 'update_form' || name === 'delete_form')) {
+      try {
+        // Extract form ID from result or args
+        let formId: string | undefined;
+        let changeType: 'created' | 'updated' | 'deleted';
+        
+        if (name === 'create_form') {
+          // Parse form ID from result
+          const resultText = result.content[0]?.text || '';
+          const match = resultText.match(/"_id"\s*:\s*"([^"]+)"/);
+          formId = match ? match[1] : undefined;
+          changeType = 'created';
+        } else if (name === 'update_form') {
+          formId = args.formId as string;
+          changeType = 'updated';
+        } else if (name === 'delete_form') {
+          formId = args.formId as string;
+          changeType = 'deleted';
+        }
+        
+        if (formId) {
+          await notifyHttpServer(formId, changeType!);
+        }
+      } catch (notifyError) {
+        // Silently fail - HTTP server might not be running
+      }
+    }
+    
+    return result;
   } catch (error) {
     // Log error for debugging
     if (error instanceof Error) {
