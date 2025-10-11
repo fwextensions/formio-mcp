@@ -315,12 +315,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       throw new Error('Missing arguments');
     }
 
+    console.error('[STDIO] Tool call received:', {
+      timestamp: new Date().toISOString(),
+      tool: name,
+      hasSharedNotifier: !!sharedFormUpdateNotifier,
+      transportType
+    });
+
     // Execute the tool
     const result = await executeToolCall(formioClient, name, args, sharedFormUpdateNotifier);
 
-    // If running as stdio process (not HTTP mode), notify HTTP server via HTTP request
+    // If running in stdio mode, always try to notify HTTP server via HTTP request
     // This enables cross-process communication for real-time updates
-    if (!sharedFormUpdateNotifier && (name === 'create_form' || name === 'update_form' || name === 'delete_form')) {
+    // Note: Each stdio call is a separate process, so sharedFormUpdateNotifier is always undefined
+    if (transportType === 'stdio' && (name === 'create_form' || name === 'update_form' || name === 'delete_form')) {
+      console.error('[STDIO] Detected form modification tool, will notify HTTP server');
+      
       try {
         // Extract form ID from result or args
         let formId: string | undefined;
@@ -340,11 +350,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           changeType = 'deleted';
         }
 
+        console.error('[STDIO] Extracted form info:', {
+          timestamp: new Date().toISOString(),
+          formId,
+          changeType: changeType!
+        });
+
         if (formId) {
           await notifyHttpServer(formId, changeType!);
+        } else {
+          console.error('[STDIO] Could not extract formId, skipping notification');
         }
       } catch (notifyError) {
-        // Silently fail - HTTP server might not be running
+        console.error('[STDIO] Error in notification logic:', {
+          timestamp: new Date().toISOString(),
+          error: notifyError instanceof Error ? notifyError.message : String(notifyError)
+        });
+        // Continue execution - HTTP server might not be running
       }
     }
 
