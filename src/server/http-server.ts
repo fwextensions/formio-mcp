@@ -310,14 +310,30 @@ export function createHttpServer(
    * This enables cross-process communication when stdio and HTTP run separately
    */
   app.post(`${config.basePath}/internal/notify-update`, express.json(), (req: Request, res: Response) => {
+    console.error('[HTTP<-STDIO] Received notification request:', {
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      url: req.url,
+      path: req.path,
+      body: req.body,
+      contentType: req.get('content-type'),
+      action: 'receive_notification'
+    });
+    
     const { formId, changeType, timestamp } = req.body;
     
     if (!formId || !changeType) {
+      console.error('[HTTP<-STDIO] Invalid notification - missing required fields:', {
+        timestamp: new Date().toISOString(),
+        formId,
+        changeType,
+        body: req.body
+      });
       res.status(400).json({ error: 'Missing formId or changeType' });
       return;
     }
     
-    console.log('[Internal] Received update notification from stdio process:', {
+    console.error('[HTTP<-STDIO] Processing notification:', {
       timestamp: timestamp || new Date().toISOString(),
       formId,
       changeType,
@@ -327,16 +343,31 @@ export function createHttpServer(
     try {
       // Trigger notification through FormUpdateNotifier
       if (changeType === 'created') {
+        console.error('[HTTP<-STDIO] Calling notifyFormCreated');
         deps.formUpdateNotifier.notifyFormCreated(formId);
       } else if (changeType === 'updated') {
+        console.error('[HTTP<-STDIO] Calling notifyFormUpdated');
         deps.formUpdateNotifier.notifyFormUpdated(formId);
       } else if (changeType === 'deleted') {
+        console.error('[HTTP<-STDIO] Calling notifyFormDeleted');
         deps.formUpdateNotifier.notifyFormDeleted(formId);
       }
       
+      console.error('[HTTP<-STDIO] Notification processed successfully:', {
+        timestamp: new Date().toISOString(),
+        formId,
+        changeType
+      });
+      
       res.json({ success: true });
     } catch (error) {
-      console.error('[Internal] Error processing notification:', error);
+      console.error('[HTTP<-STDIO] Error processing notification:', {
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        formId,
+        changeType
+      });
       res.status(500).json({ error: 'Failed to process notification' });
     }
   });

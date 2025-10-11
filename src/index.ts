@@ -249,9 +249,17 @@ async function notifyHttpServer(
   const host = process.env.MCP_HTTP_HOST || 'localhost';
   const port = process.env.MCP_HTTP_PORT || '44844';
   const basePath = process.env.MCP_HTTP_BASE_PATH || '/mcp';
-  
+
   const url = `http://${host}:${port}${basePath}/internal/notify-update`;
-  
+
+  console.error('[STDIO->HTTP] Attempting to notify HTTP server:', {
+    timestamp: new Date().toISOString(),
+    url,
+    formId,
+    changeType,
+    action: 'send_notification'
+  });
+
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -265,13 +273,32 @@ async function notifyHttpServer(
         timestamp: new Date().toISOString()
       })
     });
-    
+
     if (!response.ok) {
-      console.error('[STDIO] Failed to notify HTTP server:', response.status, response.statusText);
+      console.error('[STDIO->HTTP] Failed to notify HTTP server:', {
+        timestamp: new Date().toISOString(),
+        status: response.status,
+        statusText: response.statusText,
+        formId,
+        changeType
+      });
+    } else {
+      console.error('[STDIO->HTTP] Successfully notified HTTP server:', {
+        timestamp: new Date().toISOString(),
+        status: response.status,
+        formId,
+        changeType
+      });
     }
   } catch (error) {
-    // Silently fail - HTTP server might not be running
-    // This is expected when running in stdio-only mode
+    console.error('[STDIO->HTTP] Error notifying HTTP server:', {
+      timestamp: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+      formId,
+      changeType,
+      url
+    });
+    // Continue execution - HTTP server might not be running
   }
 }
 
@@ -290,7 +317,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Execute the tool
     const result = await executeToolCall(formioClient, name, args, sharedFormUpdateNotifier);
-    
+
     // If running as stdio process (not HTTP mode), notify HTTP server via HTTP request
     // This enables cross-process communication for real-time updates
     if (!sharedFormUpdateNotifier && (name === 'create_form' || name === 'update_form' || name === 'delete_form')) {
@@ -298,7 +325,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Extract form ID from result or args
         let formId: string | undefined;
         let changeType: 'created' | 'updated' | 'deleted';
-        
+
         if (name === 'create_form') {
           // Parse form ID from result
           const resultText = result.content[0]?.text || '';
@@ -312,7 +339,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           formId = args.formId as string;
           changeType = 'deleted';
         }
-        
+
         if (formId) {
           await notifyHttpServer(formId, changeType!);
         }
@@ -320,7 +347,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Silently fail - HTTP server might not be running
       }
     }
-    
+
     return result;
   } catch (error) {
     // Log error for debugging
