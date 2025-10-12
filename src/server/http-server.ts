@@ -17,7 +17,7 @@ import {
   logCorsConfiguration
 } from '../middleware/security.js';
 import { errorHandler, notFoundHandler } from '../middleware/error-handler.js';
-import { loggingMiddleware } from '../middleware/logging.js';
+// import { loggingMiddleware } from '../middleware/logging.js';
 import { createFormPreviewRoutes } from '../routes/form-preview.js';
 import { createPreviewUpdatesRoutes } from '../routes/preview-updates.js';
 import { FormioClient } from '../utils/formio-client.js';
@@ -69,7 +69,7 @@ export function createHttpServer(
   app.use(createRateLimitMiddleware(config));
 
   // Comprehensive request/response logging
-  app.use(loggingMiddleware);
+  // app.use(loggingMiddleware);
 
   // ============================================
   // Static Files (public assets)

@@ -248,7 +248,7 @@ async function notifyHttpServer(
 ): Promise<void> {
   const host = process.env.MCP_HTTP_HOST || 'localhost';
   const port = process.env.MCP_HTTP_PORT || '44844';
-  const basePath = process.env.MCP_HTTP_BASE_PATH || '/mcp';
+  const basePath = process.env.MCP_BASE_PATH || '/mcp/v1';
 
   const url = `http://${host}:${port}${basePath}/internal/notify-update`;
 
