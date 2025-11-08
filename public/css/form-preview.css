@@ -57,6 +57,15 @@ body {
   margin-top: 20px;
 }
 
+.formio-component-fieldset {
+    margin: 2rem 0;
+}
+
+/* Wizard layout tweaks */
+.formio-wizard-nav-container {
+  margin-top: 1rem;
+}
+
 .preview-notice {
   background: #fff3cd;
   border: 1px solid #ffc107;
@@ -89,10 +98,6 @@ body {
     margin-right: 0;
     margin-bottom: 5px;
   }
-}
-
-.formio-component-fieldset {
-    margin: 2rem 0;
 }
 
 /* Real-time Update Styles */

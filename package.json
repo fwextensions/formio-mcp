@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node --env-file=.env dist/index.js",
+    "start": "node --env-file=.env dist/index.js --http",
     "start:http": "node --env-file=.env dist/index.js --http",
     "start:stdio": "node --env-file=.env dist/index.js",
     "prepare": "npm run build"
